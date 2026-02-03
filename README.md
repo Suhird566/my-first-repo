@@ -1,56 +1,297 @@
 ```markdown
-# Project Overview
+# --- route_handler:github_login ---
+def github_login():
+    github_url = (
+        "https://github.com/login/oauth/authorize"
+        f"?client_id={GITHUB_CLIENT_ID}"
+        f"&redirect_uri=http://localhost:8000/auth/github/callback"
+        f"&scope=repo read:user user:email"
+    )
+    return RedirectResponse(github_url)
 
-This repository contains a basic implementation of a GitHub API integration for a code review agent. It focuses on a simplified authentication flow and a core functionality to retrieve repositories.
+# --- route_handler:github_callback ---
+def github_callback(code: str):
 
-## Features
+    # 1️⃣ Exchange code for access token
+    token_response = requests.post(
+        "https://github.com/login/oauth/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": GITHUB_CLIENT_ID,
+            "client_secret": GITHUB_CLIENT_SECRET,
+            "code": code
+        }
+    ).json()
 
-*   **GitHub Login:** Handles authentication with GitHub using the provided `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `GITHUB_ACCESS_TOKEN`.
-*   **GitHub User Retrieval:** Fetches user details from the GitHub API.
-*   **Repository Retrieval:**  Retrieves a list of repositories.
-*   **JWT (JSON Web Token) Management:**  Uses JWT for secure token management.
-*   **Basic Error Handling:** Includes robust error handling for API requests.
+    access_token = token_response.get("access_token")
 
-## Tech Stack
+    if not access_token:
+        raise HTTPException(400, "GitHub access token not received")
 
-*   **Python:** The primary programming language.
-*   **requests:** For making HTTP requests to the GitHub API.
-*   **UUID:** For generating unique identifiers.
-*   **datetime:** For timestamp handling.
-*   **JWT (JSON Web Token):** For authentication and authorization.
-*   **`requests`:** For fetching the Github user.
+    # 2️⃣ Fetch GitHub user
+    user_response = requests.get(
+        "https://api.github.com/user",
+        headers={
+            "Authorization": f"token {access_token}",  # ✅ FIX
+            "User-Agent": "code-review-agent"
+        }
+    )
 
-## Setup
+    user = user_response.json()
 
-1.  **Clone the Repository:**
-    ```bash
-    git clone <your_repo_here>
-    cd <your_repo_here>
-    ```
-2.  **Install Dependencies:**
-    ```bash
-    pip install requests
-    ```
-3.  **Configure `.env` File (see code):**  Edit the `.env` file to store sensitive information like `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `GITHUB_ACCESS_TOKEN`.  **DO NOT commit this file to your repository.**
-4.  **Set `JWT_SECRET`:**  Modify the `JWT_SECRET` variable in the `.env` file to a strong, randomly generated secret.
-5.  **Set `JWT_EXPIRE_MINUTES`:** Configure `JWT_EXPIRE_MINUTES` to control the expiry time of the JWT.
+    # 3️⃣ Create JWT
+    payload = {
+        "github_id": user["id"],
+        "username": user["login"],
+        "github_access_token": access_token,
+        "exp": datetime.utcnow() + timedelta(minutes=JWT_EXPIRE_MINUTES)
+    }
 
-## Usage
+    jwt_token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
-1.  **Run the Script:** Execute the script with the necessary arguments.
-    ```bash
-    python your_script.py
-    ```
-2.  **Verify Authentication:**  The script will return a redirect to the GitHub login page.
-3.  **Retrieve Repositories:**
-    ```bash
-    python your_script.py --get_repositories
-    ```
-4.  **Access User Details:**
-    ```bash
-    python your_script.py --get_repositories --user <your_github_username>
-    ```
-    (Replace `<your_github_username>` with your GitHub username.)
+    # 4️⃣ Redirect to frontend
+    return RedirectResponse(
+        f"http://localhost:5173/dashboard?token={jwt_token}"
+    )
 
-**Important Note:** The script uses the GitHub API v3.  Verify the latest documentation for this API.  The URL and parameters may need to be updated.
+# --- route_handler:get_repositories ---
+def get_repositories(user=Depends(verify_jwt)):
+
+    access_token = user.get("github_access_token")
+
+    if not access_token:
+        raise HTTPException(401, "GitHub token missing in JWT")
+
+    response = requests.get(
+        "https://api.github.com/user/repos",
+        headers={
+            "Authorization": f"token {access_token}",  # ✅ CRITICAL FIX
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "code-review-agent"
+        },
+        params={
+            "per_page": 100,
+            "sort": "updated"
+        },
+        timeout=10
+    )
+
+    if response.status_code != 200:
+        raise HTTPException(
+            response.status_code,
+            f"GitHub API error: {response.text}"
+        )
+
+    repos = response.json()
+
+    return [
+        {
+            "id": repo["id"],
+            "name": repo["name"],
+            "full_name": repo["full_name"],
+            "private": repo["private"],
+            "html_url": repo["html_url"],
+            "description": repo["description"],
+            "language": repo["language"],
+            "updated_at": repo["updated_at"]
+        }
+        for repo in repos
+    ]
+
+# --- function:github_login ---
+def github_login():
+    github_url = (
+        "https://github.com/login/oauth/authorize"
+        f"?client_id={GITHUB_CLIENT_ID}"
+        "&redirect_uri=http://localhost:8000/auth/github/callback"
+        "&scope=repo read:user user:email"
+    )
+    return RedirectResponse(github_url)
+
+# --- function:github_callback ---
+def github_callback(code: str):
+
+    # 1️⃣ Exchange code for access token
+    token_response = requests.post(
+        "https://github.com/login/oauth/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": GITHUB_CLIENT_ID,
+            "client_secret": GITHUB_CLIENT_SECRET,
+            "code": code
+        }
+    ).json()
+
+    access_token = token_response.get("access_token")
+
+    if not access_token:
+        raise HTTPException(400, "GitHub access token not received")
+
+    # 2️⃣ Fetch GitHub user
+    user_response = requests.get(
+        "https://api.github.com/user",
+        headers={
+            "Authorization": f"token {access_token}",  # ✅ FIX
+            "User-Agent": "code-review-agent"
+        }
+    )
+
+    user = user_response.json()
+
+    # 3️⃣ Create JWT
+    payload = {
+        "github_id": user["id"],
+        "username": user["login"],
+        "github_access_token": access_token,
+        "exp": datetime.utcnow() + timedelta(minutes=JWT_EXPIRE_MINUTES)
+    }
+
+    jwt_token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+    # 4️⃣ Redirect to frontend
+    return RedirectResponse(
+        f"http://localhost:5173/dashboard?token={jwt_token}"
+    )
+
+# --- function:get_repositories ---
+def get_repositories(user=Depends(verify_jwt)):
+
+    access_token = user.get("github_access_token")
+
+    if not access_token:
+        raise HTTPException(401, "GitHub token missing in JWT")
+
+    response = requests.get(
+        "https://api.github.com/user/repos",
+        headers={
+            "Authorization": f"token {access_token}",  # ✅ CRITICAL FIX
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "code-review-agent"
+        },
+        params={
+            "per_page": 100,
+            "sort": "updated"
+        },
+        timeout=10
+    )
+
+    if response.status_code != 200:
+        raise HTTPException(
+            response.status_code,
+            f"GitHub API error: {response.text}"
+        )
+
+    repos = response.json()
+
+    return [
+        {
+            "id": repo["id"],
+            "name": repo["name"],
+            "full_name": repo["full_name"],
+            "private": repo["private"],
+            "html_url": repo["html_url"],
+            "description": repo["description"],
+            "language": repo["language"],
+            "updated_at": repo["updated_at"]
+        }
+        for repo in repos
+    ]
+
+# --- function:github_login ---
+def github_login():
+    github_url = (
+        "https://github.com/login/oauth/authorize"
+        f"?client_id={GITHUB_CLIENT_ID}"
+        f"&redirect_uri=http://localhost:8000/auth/github/callback"
+        f"&scope=repo read:user user:email"
+    )
+    return RedirectResponse(github_url)
+
+# --- function:github_callback ---
+def github_callback(code: str):
+
+    # 1️⃣ Exchange code for access token
+    token_response = requests.post(
+        "https://github.com/login/oauth/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": GITHUB_CLIENT_ID,
+            "client_secret": GITHUB_CLIENT_SECRET,
+            "code": code
+        }
+    ).json()
+
+    access_token = token_response.get("access_token")
+
+    if not access_token:
+        raise HTTPException(400, "GitHub access token not received")
+
+    # 2️⃣ Fetch GitHub user
+    user_response = requests.get(
+        "https://api.github.com/user",
+        headers={
+            "Authorization": f"token {access_token}",  # ✅ CRITICAL FIX
+            "User-Agent": "code-review-agent"
+        }
+    )
+
+    user = user_response.json()
+
+    # 3️⃣ Create JWT
+    payload = {
+        "github_id": user["id"],
+        "username": user["login"],
+        "github_access_token": access_token,
+        "exp": datetime.utcnow() + timedelta(minutes=JWT_EXPIRE_MINUTES)
+    }
+
+    jwt_token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+    # 4️⃣ Redirect to frontend
+    return RedirectResponse(f"http://localhost:5173/dashboard?token={jwt_token}")
+
+# --- function:get_repositories ---
+def get_repositories(user=Depends(verify_jwt)):
+
+    access_token = user.get("github_access_token")
+
+    if not access_token:
+        raise HTTPException(401, "GitHub token missing in JWT")
+
+    response = requests.get(
+        "https://api.github.com/user/repos",
+        headers={
+            "Authorization": f"token {access_token}",  # ✅ CRITICAL FIX
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "code-review-agent"
+        },
+        params={
+            "per_page": 100,
+            "sort": "updated"
+        },
+        timeout=10
+    )
+
+    if response.status_code != 200:
+        raise HTTPException(
+            response.status_code,
+            f"GitHub API error: {response.text}"
+        )
+
+    repos = response.json()
+
+    return [
+        {
+            "id": repo["id"],
+            "name": repo["name"],
+            "full_name": repo["full_name"],
+            "private": repo["private"],
+            "html_url": repo["html_url"],
+            "description": repo["description"],
+            "language": repo["language"],
+            "updated_at": repo["updated_at"]
+        }
+        for repo in repos
+    ]
+
 ```
