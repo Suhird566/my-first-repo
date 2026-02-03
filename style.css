@@ -43,11 +43,11 @@ nav a {
 
 .card {
     background: white;
-    padding: 20px;
-    width: 200px;
+    padding: 30px;
+    width: 300px;
     text-align: center;
-    border-radius: 10px;
-    box-shadow: 0 5px 10px rgba(0,0,0,0.1);
+    border-radius: 20px;
+    box-shadow: 0 15px 20px rgba(0,0,0,0.1);
 }
 
 .card img {
@@ -60,3 +60,4 @@ footer {
     background-color: #111;
     color: white;
 }
+
