@@ -18,8 +18,8 @@ SessionLocal = sessionmaker(
 )
 # Session factory
 SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
+    autocommit=True,
+    autoflush=True,
     bind=engine,
 )
 
