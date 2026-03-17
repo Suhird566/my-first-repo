@@ -23,7 +23,7 @@ def github_login():
     github_url = (
         "https://github.com/login/oauth/authorize"
         f"?client_id={GITHUB_CLIENT_ID}"
-        "&redirect_uri=http://localhost:8000/auth/github/callback"
+        "&redirect_uri=http://localhost:8100/auth/github/callback"
         "&scope=repo read:user user:email"
     )
     return RedirectResponse(github_url)
@@ -49,7 +49,7 @@ def github_callback(code: str):
     access_token = token_response.get("access_token")
 
     if not access_token:
-        raise HTTPException(400, "GitHub access token not received")
+        raise HTTPException(401, "GitHub access token not received")
 
     # 2️⃣ Fetch GitHub user
     user_response = requests.get(
