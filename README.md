@@ -1,297 +1,104 @@
-```markdown
-# --- route_handler:github_login ---
-def github_login():
-    github_url = (
-        "https://github.com/login/oauth/authorize"
-        f"?client_id={GITHUB_CLIENT_ID}"
-        f"&redirect_uri=http://localhost:8000/auth/github/callback"
-        f"&scope=repo read:user user:email"
-    )
-    return RedirectResponse(github_url)
+# my-first-repo
+A backend service handling GitHub authentication and managing core application data for code review and documentation processes.
 
-# --- route_handler:github_callback ---
-def github_callback(code: str):
+---
 
-    # 1️⃣ Exchange code for access token
-    token_response = requests.post(
-        "https://github.com/login/oauth/access_token",
-        headers={"Accept": "application/json"},
-        data={
-            "client_id": GITHUB_CLIENT_ID,
-            "client_secret": GITHUB_CLIENT_SECRET,
-            "code": code
-        }
-    ).json()
+## Codebase Tour (Start Here)
 
-    access_token = token_response.get("access_token")
+1.  **`auth.py`**
+    This file teaches you how users authenticate with GitHub and how the application fetches data from the GitHub API.
+2.  **`models.py`**
+    This file teaches you the core data structures and database schema used across the application.
 
-    if not access_token:
-        raise HTTPException(400, "GitHub access token not received")
+## Architecture & Data Flow
 
-    # 2️⃣ Fetch GitHub user
-    user_response = requests.get(
-        "https://api.github.com/user",
-        headers={
-            "Authorization": f"token {access_token}",  # ✅ FIX
-            "User-Agent": "code-review-agent"
-        }
-    )
+This repository contains core logic for handling user authentication via GitHub OAuth and defining the data models for the application's domain. The `auth.py` file manages the OAuth flow, exchanging authorization codes for access tokens, fetching user details from GitHub, and issuing internal JWTs. It also provides functionality to retrieve a user's GitHub repositories. The `models.py` file defines the database schema for entities such as organizations, users, repositories, and various operational runs like documentation and code reviews.
 
-    user = user_response.json()
+`github_login()` in `auth.py` → `github_callback()` in `auth.py` (GitHub OAuth, JWT creation) → `get_repositories()` in `auth.py` (fetches GitHub data) → `models.py` (defines data structures for persistence)
 
-    # 3️⃣ Create JWT
-    payload = {
-        "github_id": user["id"],
-        "username": user["login"],
-        "github_access_token": access_token,
-        "exp": datetime.utcnow() + timedelta(minutes=JWT_EXPIRE_MINUTES)
-    }
+## Key Entry Points
 
-    jwt_token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+*   **`auth.github_login()` in `auth.py`**: Initiates the GitHub OAuth login flow by redirecting the user to GitHub's authorization page.
+*   **`auth.github_callback()` in `auth.py`**: Handles the callback from GitHub after authorization, exchanging the code for an access token, fetching user details, and issuing a JWT.
+*   **`auth.get_repositories()` in `auth.py`**: Fetches a list of repositories for the authenticated user from the GitHub API.
 
-    # 4️⃣ Redirect to frontend
-    return RedirectResponse(
-        f"http://localhost:5173/dashboard?token={jwt_token}"
-    )
+## Folder / File Walkthrough
 
-# --- route_handler:get_repositories ---
-def get_repositories(user=Depends(verify_jwt)):
+### `auth.py`
+**Owns:** This file is responsible for handling GitHub OAuth authentication, user data retrieval from GitHub, and the creation of internal JSON Web Tokens (JWTs).
+**Key symbols:** `github_login`, `github_callback`, `get_repositories`
+**Gotcha:** The `github_callback` function performs a multi-step process involving external API calls to GitHub for token exchange and user data, followed by internal JWT creation and a frontend redirect. The `get_repositories` function relies on a `verify_jwt` dependency to ensure the user is authenticated and their GitHub access token is available.
 
-    access_token = user.get("github_access_token")
+### `models.py`
+**Owns:** This file defines the SQLAlchemy ORM models representing the application's database schema, including entities like organizations, users, repositories, and various operational runs (documentation, code review) and their findings.
+**Key symbols:** `Organization`, `User`, `Repository`, `DocumentationRun`, `PullRequest`, `CodeReviewRun`, `ReviewFinding`
+**Gotcha:** All models inherit from a `Base` class (not provided in evidence, but implied by usage) and define `__tablename__` and `Column` definitions, including `UUID` primary keys and `ForeignKey` relationships. Understanding these relationships is key to navigating the data model.
 
-    if not access_token:
-        raise HTTPException(401, "GitHub token missing in JWT")
+## How to Extend This Codebase
 
-    response = requests.get(
-        "https://api.github.com/user/repos",
-        headers={
-            "Authorization": f"token {access_token}",  # ✅ CRITICAL FIX
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "code-review-agent"
-        },
-        params={
-            "per_page": 100,
-            "sort": "updated"
-        },
-        timeout=10
-    )
+**Adding new endpoints / modules / agents / services**
+*   **New authentication endpoints**: To add a new authentication flow or endpoint, you would typically create a new function in `auth.py` (or a similar module) that follows the pattern of `github_login` for initiating external redirects and `github_callback` for handling the response, token exchange, and JWT creation.
+*   **New data models**: To introduce new entities or modify existing ones, define new classes in `models.py` that inherit from `Base` (implied). Ensure you specify a `__tablename__`, define `Column` types for all attributes, and correctly establish `ForeignKey` relationships to other models as needed.
 
-    if response.status_code != 200:
-        raise HTTPException(
-            response.status_code,
-            f"GitHub API error: {response.text}"
-        )
+**Common pitfalls**
+*   In `auth.py`, when making requests to the GitHub API (e.g., in `github_callback` and `get_repositories`), it's critical to include the `User-Agent` header. Forgetting this can lead to API request failures or rate limiting.
+*   When defining new models in `models.py`, ensure that `ForeignKey` relationships correctly reference the `__tablename__` and `id` column of the parent table (e.g., `organizations.id` for `organization_id`). Incorrect references will cause database schema issues.
+*   Handling sensitive information like `GITHUB_CLIENT_SECRET` and `JWT_SECRET` in `auth.py` requires careful attention to security best practices, such as using environment variables and avoiding hardcoding.
 
-    repos = response.json()
+**PR checklist**
+> ⚠️ Not confirmed — check [specific path or symbol name].
+*   > ⚠️ Not confirmed — verify that new database models in `models.py` have corresponding migrations generated.
+*   > ⚠️ Not confirmed — ensure all new API calls in `auth.py` include appropriate error handling and logging.
+*   > ⚠️ Not confirmed — confirm that all environment variables used are documented and configured for deployment.
+*   > ⚠️ Not confirmed — verify that any changes to authentication flows are tested for security vulnerabilities.
 
-    return [
-        {
-            "id": repo["id"],
-            "name": repo["name"],
-            "full_name": repo["full_name"],
-            "private": repo["private"],
-            "html_url": repo["html_url"],
-            "description": repo["description"],
-            "language": repo["language"],
-            "updated_at": repo["updated_at"]
-        }
-        for repo in repos
-    ]
+## Project Overview
 
-# --- function:github_login ---
-def github_login():
-    github_url = (
-        "https://github.com/login/oauth/authorize"
-        f"?client_id={GITHUB_CLIENT_ID}"
-        "&redirect_uri=http://localhost:8000/auth/github/callback"
-        "&scope=repo read:user user:email"
-    )
-    return RedirectResponse(github_url)
+`my-first-repo` serves as a foundational backend component, primarily focused on integrating with GitHub for user authentication and managing the application's core data. It enables users to log in via GitHub OAuth, retrieves their repository information, and maintains a structured database of organizations, users, repositories, and various operational records related to documentation generation and code review processes. This repository likely underpins a larger application that leverages these capabilities for automated code analysis or documentation.
 
-# --- function:github_callback ---
-def github_callback(code: str):
+## Features
 
-    # 1️⃣ Exchange code for access token
-    token_response = requests.post(
-        "https://github.com/login/oauth/access_token",
-        headers={"Accept": "application/json"},
-        data={
-            "client_id": GITHUB_CLIENT_ID,
-            "client_secret": GITHUB_CLIENT_SECRET,
-            "code": code
-        }
-    ).json()
+*   **GitHub OAuth Authentication**: Allows users to log in using their GitHub accounts, obtaining necessary access tokens.
+*   **GitHub User & Repository Data Fetching**: Retrieves authenticated user profiles and lists of their repositories from the GitHub API.
+*   **Internal JWT Generation**: Creates secure JSON Web Tokens for authenticated users to manage session state.
+*   **Core Data Modeling**: Defines database schemas for:
+    *   Organizations and Users.
+    *   Repositories connected to the platform.
+    *   `DocumentationRun` records, tracking documentation generation processes.
+    *   `PullRequest` entities, representing GitHub pull requests.
+    *   `CodeReviewRun` records, tracking automated code review processes.
+    *   `ReviewFinding` entities, detailing specific issues found during code reviews.
 
-    access_token = token_response.get("access_token")
+## Tech Stack
 
-    if not access_token:
-        raise HTTPException(400, "GitHub access token not received")
+*   **Python**: The primary programming language.
+*   **requests**: Used for making HTTP requests to external APIs, specifically GitHub (seen in `auth.py`).
+*   **uuid**: Used for generating UUIDs, particularly for primary keys in database models (seen in `models.py`).
+*   **SQLAlchemy (implied)**: Used for Object-Relational Mapping (ORM) to interact with a database, as evidenced by `Base` inheritance, `Column` definitions, `__tablename__`, and `ForeignKey` in `models.py`.
+*   **PyJWT (implied)**: Used for encoding JSON Web Tokens (seen in `jwt.encode` in `auth.py`).
+*   **Web Framework (implied)**: A web framework is used for handling HTTP requests and responses, evidenced by `RedirectResponse`, `HTTPException`, and `Depends` in `auth.py`.
 
-    # 2️⃣ Fetch GitHub user
-    user_response = requests.get(
-        "https://api.github.com/user",
-        headers={
-            "Authorization": f"token {access_token}",  # ✅ FIX
-            "User-Agent": "code-review-agent"
-        }
-    )
+## Setup
 
-    user = user_response.json()
+> ⚠️ Not confirmed — verify before running.
+No explicit setup commands (e.g., `pip install`, `docker-compose`) were found in the evidence.
 
-    # 3️⃣ Create JWT
-    payload = {
-        "github_id": user["id"],
-        "username": user["login"],
-        "github_access_token": access_token,
-        "exp": datetime.utcnow() + timedelta(minutes=JWT_EXPIRE_MINUTES)
-    }
+**Environment Variables:**
+*   `GITHUB_CLIENT_ID`: Used in `auth.py` for initiating GitHub OAuth. If missing, GitHub login will fail.
+*   `GITHUB_CLIENT_SECRET`: Used in `auth.py` to exchange the authorization code for an access token. If missing, GitHub login will fail.
+*   `JWT_SECRET`: Used in `auth.py` for signing internal JWTs. If missing, JWT creation will fail, preventing user sessions.
+*   `JWT_ALGORITHM`: Used in `auth.py` to specify the algorithm for JWT signing. If missing, JWT creation will fail.
+*   `JWT_EXPIRE_MINUTES`: Used in `auth.py` to set the expiration time for JWTs. If missing, JWT expiration will be undefined or default.
 
-    jwt_token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+No explicit configuration files were found in the evidence.
 
-    # 4️⃣ Redirect to frontend
-    return RedirectResponse(
-        f"http://localhost:5173/dashboard?token={jwt_token}"
-    )
+## Usage
 
-# --- function:get_repositories ---
-def get_repositories(user=Depends(verify_jwt)):
+> ⚠️ Not confirmed — verify before running.
+No explicit usage commands were found in the evidence.
 
-    access_token = user.get("github_access_token")
-
-    if not access_token:
-        raise HTTPException(401, "GitHub token missing in JWT")
-
-    response = requests.get(
-        "https://api.github.com/user/repos",
-        headers={
-            "Authorization": f"token {access_token}",  # ✅ CRITICAL FIX
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "code-review-agent"
-        },
-        params={
-            "per_page": 100,
-            "sort": "updated"
-        },
-        timeout=10
-    )
-
-    if response.status_code != 200:
-        raise HTTPException(
-            response.status_code,
-            f"GitHub API error: {response.text}"
-        )
-
-    repos = response.json()
-
-    return [
-        {
-            "id": repo["id"],
-            "name": repo["name"],
-            "full_name": repo["full_name"],
-            "private": repo["private"],
-            "html_url": repo["html_url"],
-            "description": repo["description"],
-            "language": repo["language"],
-            "updated_at": repo["updated_at"]
-        }
-        for repo in repos
-    ]
-
-# --- function:github_login ---
-def github_login():
-    github_url = (
-        "https://github.com/login/oauth/authorize"
-        f"?client_id={GITHUB_CLIENT_ID}"
-        f"&redirect_uri=http://localhost:8000/auth/github/callback"
-        f"&scope=repo read:user user:email"
-    )
-    return RedirectResponse(github_url)
-
-# --- function:github_callback ---
-def github_callback(code: str):
-
-    # 1️⃣ Exchange code for access token
-    token_response = requests.post(
-        "https://github.com/login/oauth/access_token",
-        headers={"Accept": "application/json"},
-        data={
-            "client_id": GITHUB_CLIENT_ID,
-            "client_secret": GITHUB_CLIENT_SECRET,
-            "code": code
-        }
-    ).json()
-
-    access_token = token_response.get("access_token")
-
-    if not access_token:
-        raise HTTPException(400, "GitHub access token not received")
-
-    # 2️⃣ Fetch GitHub user
-    user_response = requests.get(
-        "https://api.github.com/user",
-        headers={
-            "Authorization": f"token {access_token}",  # ✅ CRITICAL FIX
-            "User-Agent": "code-review-agent"
-        }
-    )
-
-    user = user_response.json()
-
-    # 3️⃣ Create JWT
-    payload = {
-        "github_id": user["id"],
-        "username": user["login"],
-        "github_access_token": access_token,
-        "exp": datetime.utcnow() + timedelta(minutes=JWT_EXPIRE_MINUTES)
-    }
-
-    jwt_token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
-    # 4️⃣ Redirect to frontend
-    return RedirectResponse(f"http://localhost:5173/dashboard?token={jwt_token}")
-
-# --- function:get_repositories ---
-def get_repositories(user=Depends(verify_jwt)):
-
-    access_token = user.get("github_access_token")
-
-    if not access_token:
-        raise HTTPException(401, "GitHub token missing in JWT")
-
-    response = requests.get(
-        "https://api.github.com/user/repos",
-        headers={
-            "Authorization": f"token {access_token}",  # ✅ CRITICAL FIX
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "code-review-agent"
-        },
-        params={
-            "per_page": 100,
-            "sort": "updated"
-        },
-        timeout=10
-    )
-
-    if response.status_code != 200:
-        raise HTTPException(
-            response.status_code,
-            f"GitHub API error: {response.text}"
-        )
-
-    repos = response.json()
-
-    return [
-        {
-            "id": repo["id"],
-            "name": repo["name"],
-            "full_name": repo["full_name"],
-            "private": repo["private"],
-            "html_url": repo["html_url"],
-            "description": repo["description"],
-            "language": repo["language"],
-            "updated_at": repo["updated_at"]
-        }
-        for repo in repos
-    ]
-
-```
+The primary usage flow involves:
+1.  A user initiating the GitHub login process, which is handled by `github_login()` in `auth.py`.
+2.  Upon successful GitHub authorization, `github_callback()` in `auth.py` processes the response, authenticates the user, and issues an internal JWT.
+3.  Authenticated users can then use their JWT to call endpoints like `get_repositories()` in `auth.py` to fetch their GitHub repository data.
+4.  The application's data, as defined in `models.py`, would be persisted to a database, allowing for tracking of organizations, users, repositories, and various operational runs (documentation, code reviews) and their findings.
